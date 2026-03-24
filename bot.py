@@ -1,20 +1,74 @@
+# bot.py
 import os
+import asyncio
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from telegram_bot.downloader import procesar_link, botones_handler
+from Telegram_bot.control import start_command, botones
+from Telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
+from Telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola, ver_cola, en_proceso
 
-TOKEN = os.getenv("TOKEN")
+async def procesar_link(update, context):
+    url = update.message.text
+    context.user_data['link'] = url
+    await update.message.reply_text("💜 Elige formato:", reply_markup=botones())
 
-async def start(update, context):
-    await update.message.reply_text(
-        "💀 KHASAM BOT Ultimate 24/7\n"
-        "Envía links de YouTube/TikTok y elige MP3 o MP4.\n"
-        "🎵 YouTube → MP3 con portada\n"
-        "🎬 TikTok → MP4\n"
-        "📝 Cola, progreso real y VIP!"
+async def botones_handler(update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    username = query.from_user.username or "User"
+    url = context.user_data.get("link")
+    if not url:
+        await query.edit_message_text("❌ No hay link")
+        return
+
+    formato = query.data
+    posicion = agregar_a_cola(user_id, username, query, url, formato)
+    await query.edit_message_text(
+        f"💜 Añadido a la cola\n📊 Posición: {posicion}\n⏱ Tiempo estimado: {posicion*15}s\n\n"
+        f"🧾 Cola actual:\n{ver_cola()}"
     )
 
+    # Procesar cola
+    await procesar_cola(context)
+
+async def procesar_cola(context):
+    global en_proceso
+    if en_proceso or not estado_cola:
+        return
+
+    en_proceso = True
+    query, formato, user_id, username, url = quitar_de_cola()
+    msg = await query.message.reply_text("💜 Iniciando descarga...")
+    title = obtener_metadata(url)
+
+    try:
+        if formato == "mp3":
+            ruta, thumb = await descargar_audio(user_id, url, msg)
+            await query.message.reply_audio(
+                audio=open(ruta, "rb"),
+                title=title,
+                thumbnail=open(thumb, "rb") if os.path.exists(thumb) else None
+            )
+        else:
+            ruta = await descargar_video(user_id, url, msg)
+            await query.message.reply_video(
+                video=open(ruta, "rb"),
+                caption=title
+            )
+        if os.path.exists(ruta):
+            os.remove(ruta)
+    except Exception as e:
+        await query.message.reply_text(f"❌ Error: {e}")
+
+    await query.message.reply_text("✅ Descarga completa 💜")
+    en_proceso = False
+    if estado_cola:
+        await procesar_cola(context)
+
+# ---------------- RUN BOT ----------------
+TOKEN = os.getenv("TOKEN")
 app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("start", start_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_link))
 app.add_handler(CallbackQueryHandler(botones_handler))
 app.run_polling()
