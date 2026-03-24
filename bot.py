@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 # ---------------- Cargar variables ----------------
 load_dotenv()
 TOKEN = os.getenv("8783635581:AAEEAqLo8kAair708D8E23g_mH10oiIriGo")
-MI_CHAT_ID = int(os.getenv("SrRussu"))
+MI_CHAT_ID = int(os.getenv("8295382991"))
 
 # ---------------- Crear carpetas -----------------
 os.makedirs("downloads/audio", exist_ok=True)
