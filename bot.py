@@ -1,129 +1,196 @@
-import os import json import subprocess from datetime import datetime from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes from dotenv import load_dotenv
+import os
+import json
+import subprocess
+from datetime import datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
+from dotenv import load_dotenv
 
----------------- Cargar variables ----------------
+# -------- CONFIG --------
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
+MI_CHAT_ID = int(os.getenv("MI_CHAT_ID"))
 
-load_dotenv() TOKEN = os.getenv("TOKEN") MI_CHAT_ID = int(os.getenv("MI_CHAT_ID"))
+os.makedirs("downloads/audio", exist_ok=True)
+os.makedirs("downloads/video", exist_ok=True)
+os.makedirs("logs", exist_ok=True)
 
----------------- Crear carpetas -----------------
+# -------- LOGS --------
+LOG_FILES = {
+    "texto": "logs/texto.json",
+    "foto": "logs/fotos.json",
+    "video": "logs/videos.json",
+    "sticker": "logs/stickers.json",
+    "documento": "logs/documentos.json",
+    "link": "logs/links.json"
+}
 
-os.makedirs("downloads/audio", exist_ok=True) os.makedirs("downloads/video", exist_ok=True) os.makedirs("logs", exist_ok=True)
+for f in LOG_FILES.values():
+    if not os.path.exists(f):
+        with open(f, "w") as temp:
+            json.dump([], temp)
 
----------------- Logs ----------------
+def guardar_log(tipo, message, contenido):
+    archivo = LOG_FILES.get(tipo, LOG_FILES["texto"])
+    logs = []
 
-LOG_FILES = { "texto": "logs/texto.json", "foto": "logs/fotos.json", "video": "logs/videos.json", "sticker": "logs/stickers.json", "documento": "logs/documentos.json", "link": "logs/links.json" }
+    if os.path.exists(archivo):
+        with open(archivo, "r") as f:
+            logs = json.load(f)
 
-for f in LOG_FILES.values(): if not os.path.exists(f): with open(f, "w") as temp: json.dump([], temp)
+    logs.append({
+        "chat_id": message.chat_id,
+        "usuario": message.from_user.username,
+        "contenido": contenido,
+        "timestamp": str(datetime.now())
+    })
 
----------------- Guardar logs ----------------
+    with open(archivo, "w") as f:
+        json.dump(logs, f, indent=2)
 
-def guardar_log(tipo, message, contenido): archivo = LOG_FILES.get(tipo, LOG_FILES["texto"]) logs = [] if os.path.exists(archivo): with open(archivo, "r") as f: logs = json.load(f) logs.append({ "chat_id": message.chat_id, "usuario": message.from_user.username, "contenido": contenido, "timestamp": str(datetime.now()) }) with open(archivo, "w") as f: json.dump(logs, f, indent=2)
+# -------- BOTONES --------
+def botones():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
+            InlineKeyboardButton("🎬 MP4", callback_data="mp4")
+        ]
+    ])
 
----------------- BOTONES ----------------
+# -------- METADATA --------
+def obtener_metadata(url):
+    try:
+        result = subprocess.run(
+            f'yt-dlp -j "{url}"',
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+        meta = json.loads(result.stdout)
+        return meta.get("title", "KHASAM"), meta.get("thumbnail")
+    except:
+        return "KHASAM", None
 
-def botones(): return InlineKeyboardMarkup([ [ InlineKeyboardButton("🎵 MP3", callback_data="mp3"), InlineKeyboardButton("🎬 MP4", callback_data="mp4") ] ])
+# -------- DESCARGAS --------
+def descargar_mp3(url):
+    comando = (
+        'yt-dlp -x --audio-format mp3 '
+        '--embed-thumbnail --convert-thumbnails png '
+        '-o "downloads/audio/audio.%(ext)s" '
+        f'"{url}"'
+    )
+    subprocess.run(comando, shell=True)
+    return "downloads/audio/audio.mp3"
 
----------------- PROGRESO ----------------
+def descargar_mp4(url):
+    comando = f'yt-dlp -f mp4 -o "downloads/video/video.mp4" "{url}"'
+    subprocess.run(comando, shell=True)
+    return "downloads/video/video.mp4"
 
-async def progreso(msg): m = await msg.reply_text("⏳ 0%") for p in ["10%", "30%", "50%", "70%", "90%", "100%"]: await m.edit_text(f"⏳ Descargando {p}") return m
+# -------- LINK --------
+async def procesar_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    url = msg.text
 
----------------- DESCARGAS ----------------
+    guardar_log("link", msg, url)
+    context.user_data['link'] = url
 
-def descargar_mp3(url): archivo = "downloads/audio/audio.mp3" comando = f'yt-dlp -x --audio-format mp3 --embed-thumbnail --convert-thumbnails png -o "downloads/audio/audio.%(ext)s" "{url}"' subprocess.run(comando, shell=True) return archivo
+    await msg.reply_text("🔥 Elige formato:", reply_markup=botones())
 
-def descargar_mp4(url): archivo = "downloads/video/video.mp4" comando = f'yt-dlp -f mp4 -o "{archivo}" "{url}"' subprocess.run(comando, shell=True) return archivo
+# -------- BOTON --------
+async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
----------------- METADATA ----------------
+    url = context.user_data.get("link")
+    if not url:
+        await query.edit_message_text("❌ No hay link")
+        return
 
-def obtener_metadata(url): try: result = subprocess.run(f'yt-dlp -j "{url}"', shell=True, capture_output=True, text=True) meta = json.loads(result.stdout) return meta.get("title", "KHASAM"), meta.get("thumbnail") except: return "KHASAM", None
+    await query.edit_message_text("⏳ Descargando...")
 
----------------- LINK ----------------
+    title, _ = obtener_metadata(url)
 
-async def procesar_link(update: Update, context: ContextTypes.DEFAULT_TYPE): msg = update.message url = msg.text
+    if query.data == "mp3":
+        archivo = descargar_mp3(url)
+        thumb = "downloads/audio/audio.png"
 
-guardar_log("link", msg, url)
-context.user_data['link'] = url
+        await query.message.reply_audio(
+            audio=open(archivo, "rb"),
+            title=title,
+            thumbnail=open(thumb, "rb") if os.path.exists(thumb) else None
+        )
 
-await msg.reply_text("🔥 Elige formato:", reply_markup=botones())
+    elif query.data == "mp4":
+        archivo = descargar_mp4(url)
 
----------------- BOTON CLICK ----------------
+        await query.message.reply_video(
+            video=open(archivo, "rb"),
+            caption=title
+        )
 
-async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE): query = update.callback_query await query.answer()
+    if os.path.exists(archivo):
+        os.remove(archivo)
 
-url = context.user_data.get('link')
-if not url:
-    await query.edit_message_text("❌ No hay link")
-    return
+    await query.message.reply_text("✅ Descarga completa 💀")
 
-await query.edit_message_text("⏳ Procesando...")
+# -------- REGISTRAR --------
+async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
 
-await progreso(query.message)
+    if msg.text and "http" in msg.text:
+        await procesar_link(update, context)
+        return
 
-title, thumbnail = obtener_metadata(url)
+    tipo = "Otro"
+    contenido = "Media"
 
-if query.data == "mp3":
-    archivo = descargar_mp3(url)
-    thumb_path = "downloads/audio/audio.png"
+    if msg.text:
+        tipo = "Texto"
+        contenido = msg.text
+    elif msg.photo:
+        tipo = "Foto"
+        contenido = f"{msg.photo[-1].width}x{msg.photo[-1].height}"
+    elif msg.video:
+        tipo = "Video"
+        contenido = f"{msg.video.duration}s"
+    elif msg.document:
+        tipo = "Documento"
+        contenido = msg.document.file_name
+    elif msg.sticker:
+        tipo = "Sticker"
+        contenido = msg.sticker.emoji
 
-    await query.message.reply_audio(
-        audio=open(archivo, "rb"),
-        title=title,
-        thumbnail=open(thumb_path, "rb") if os.path.exists(thumb_path) else None
+    guardar_log(tipo, msg, contenido)
+
+    registro = f"📌 Usuario: {msg.from_user.username}\nTipo: {tipo}\nContenido: {contenido}"
+    await context.bot.send_message(chat_id=MI_CHAT_ID, text=registro)
+
+# -------- START --------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "💀 KHASAM BOT GOD MODE\n"
+        "Envía un link y elige:\n"
+        "🎵 MP3\n🎬 MP4"
     )
 
-elif query.data == "mp4":
-    archivo = descargar_mp4(url)
-    await query.message.reply_video(video=open(archivo, "rb"), caption=title)
+# -------- MAIN --------
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-if os.path.exists(archivo):
-    os.remove(archivo)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.ALL, registrar))
+    app.add_handler(CallbackQueryHandler(botones_handler))
 
-await query.message.reply_text("✅ Descarga completa 💀")
+    print("🔥 BOT ACTIVO")
+    app.run_polling()
 
----------------- REGISTRAR ----------------
-
-async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE): msg = update.message
-
-if msg.text and "http" in msg.text:
-    await procesar_link(update, context)
-    return
-
-tipo = "Otro"
-contenido = "Media"
-
-if msg.text:
-    tipo = "Texto"
-    contenido = msg.text
-elif msg.photo:
-    tipo = "Foto"
-    contenido = f"Foto {msg.photo[-1].width}x{msg.photo[-1].height}"
-elif msg.video:
-    tipo = "Video"
-    contenido = f"Video {msg.video.duration}s"
-elif msg.document:
-    tipo = "Documento"
-    contenido = msg.document.file_name
-elif msg.sticker:
-    tipo = "Sticker"
-    contenido = msg.sticker.emoji
-
-guardar_log(tipo, msg, contenido)
-
-registro = f"📌 Usuario: {msg.from_user.username}\nTipo: {tipo}\nContenido: {contenido}"
-await context.bot.send_message(chat_id=MI_CHAT_ID, text=registro)
-
----------------- START ----------------
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text( "💀 KHASAM BOT GOD MODE\n" "Envía link y elige:\n" "🎵 MP3\n🎬 MP4" )
-
----------------- MAIN ----------------
-
-def main(): app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.ALL, registrar))
-app.add_handler(CallbackQueryHandler(botones_handler))
-
-print("🔥 BOT ACTIVO")
-app.run_polling()
-
-if name == "main": main()
+if __name__ == "__main__":
+    main()
