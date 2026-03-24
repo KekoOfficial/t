@@ -4,7 +4,7 @@ import os
 import subprocess
 
 # ID del admin (tú)
-ADMIN_ID = 123456789  # <- reemplaza con tu user_id de Telegram
+ADMIN_ID = 8295382991  # <- reemplaza con tu user_id de Telegram
 
 # ----------------- Botones -----------------
 def botones():
