@@ -20,17 +20,20 @@ os.makedirs("logs", exist_ok=True)
 LOG_FILES = {
     "texto": "logs/texto.json",
     "foto": "logs/fotos.json",
+    "video": "logs/videos.json",
     "sticker": "logs/stickers.json",
+    "documento": "logs/documentos.json",
     "link": "logs/links.json"
 }
 
+# Inicializar logs vacíos si no existen
 for f in LOG_FILES.values():
     if not os.path.exists(f):
         with open(f, "w") as temp:
             json.dump([], temp)
 
 # ---------------- Guardar logs -------------------
-def guardar_log(tipo, message):
+def guardar_log(tipo, message, contenido):
     archivo = LOG_FILES.get(tipo, LOG_FILES["texto"])
     logs = []
     if os.path.exists(archivo):
@@ -39,7 +42,7 @@ def guardar_log(tipo, message):
     logs.append({
         "chat_id": message.chat_id,
         "usuario": message.from_user.username,
-        "contenido": message.text if message.text else "Archivo/Sticker",
+        "contenido": contenido,
         "timestamp": str(datetime.now())
     })
     with open(archivo, "w") as f:
@@ -56,7 +59,7 @@ async def progreso(update, archivo):
 async def procesar_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     url = msg.text
-    guardar_log("link", msg)
+    guardar_log("link", msg, url)
     await update.message.reply_text("🔥 Detecté link, procesando...")
 
     # Barra de progreso simulada
@@ -102,25 +105,35 @@ async def procesar_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------- Registrar todo ------------------
 async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    # Detectar tipo de mensaje
+
+    # Detectar links primero
     if msg.text and "http" in msg.text:
         await procesar_link(update, context)
         return
-    elif msg.text:
-        guardar_log("texto", msg)
+
+    tipo = "Otro"
+    contenido = "Archivo/Media"
+
+    if msg.text:
         tipo = "Texto"
         contenido = msg.text
+        guardar_log(tipo, msg, contenido)
     elif msg.photo:
-        guardar_log("foto", msg)
         tipo = "Foto"
-        contenido = f"Foto con {len(msg.photo)} resoluciones"
+        contenido = f"Foto con {len(msg.photo)} resoluciones, mayor resolución: {msg.photo[-1].width}x{msg.photo[-1].height}"
+        guardar_log(tipo, msg, contenido)
+    elif msg.video:
+        tipo = "Video"
+        contenido = f"Video: {msg.video.file_name if msg.video.file_name else 'Sin nombre'}, duración {msg.video.duration}s, {msg.video.width}x{msg.video.height}"
+        guardar_log(tipo, msg, contenido)
+    elif msg.document:
+        tipo = "Documento"
+        contenido = f"Archivo: {msg.document.file_name}, tamaño {msg.document.file_size} bytes"
+        guardar_log(tipo, msg, contenido)
     elif msg.sticker:
-        guardar_log("sticker", msg)
         tipo = "Sticker"
         contenido = f"Sticker: {msg.sticker.emoji} ({msg.sticker.set_name})"
-    else:
-        tipo = "Otro"
-        contenido = "Archivo/Media"
+        guardar_log(tipo, msg, contenido)
 
     # Enviar registro a ti
     registro = f"📌 Usuario: {msg.from_user.username} ({msg.from_user.id})\nTipo: {tipo}\nContenido: {contenido}"
