@@ -3,16 +3,13 @@ import os
 import json
 import asyncio
 from collections import deque
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-# -------- CONFIG --------
+# -------- COLA GLOBAL --------
 cola = deque()
 en_proceso = False
-
-VIP_USERS = [123456789]  # 🔥 pon tu ID aquí
-
 estado_cola = []
+VIP_USERS = [123456789]  # 👑 Pon tu ID VIP
 
 # -------- BOTONES --------
 def botones():
@@ -25,7 +22,8 @@ def botones():
 
 # -------- TIEMPO ESTIMADO --------
 def estimar_tiempo(posicion):
-    base = 20  # segundos promedio por descarga
+    # base aproximada por descarga en segundos
+    base = 15  # más rápido con fragmentos 10
     return posicion * base
 
 # -------- PROGRESO REAL --------
@@ -73,7 +71,6 @@ def ver_cola():
 async def procesar_link(update, context):
     url = update.message.text
     context.user_data['link'] = url
-
     await update.message.reply_text(
         "💜 Elige formato:",
         reply_markup=botones()
@@ -98,10 +95,12 @@ async def procesar_cola(context):
     try:
         if formato == "mp3":
             ruta = f"downloads/audio/{user_id}.mp3"
-            cmd = f'yt-dlp -x --audio-format mp3 --embed-thumbnail --convert-thumbnails png --concurrent-fragments 10 -o "downloads/audio/{user_id}.%(ext)s" "{url}"'
-
+            cmd = (
+                f'yt-dlp -x --audio-format mp3 --embed-thumbnail '
+                f'--convert-thumbnails png --concurrent-fragments 10 '
+                f'-o "downloads/audio/{user_id}.%(ext)s" "{url}"'
+            )
             await descargar_con_progreso(cmd, msg)
-
             thumb = f"downloads/audio/{user_id}.png"
 
             await query.message.reply_audio(
@@ -112,8 +111,10 @@ async def procesar_cola(context):
 
         else:
             ruta = f"downloads/video/{user_id}.mp4"
-            cmd = f'yt-dlp -f mp4 --concurrent-fragments 10 -o "{ruta}" "{url}"'
-
+            cmd = (
+                f'yt-dlp -f mp4 --concurrent-fragments 10 '
+                f'-o "{ruta}" "{url}"'
+            )
             await descargar_con_progreso(cmd, msg)
 
             await query.message.reply_video(
@@ -134,7 +135,7 @@ async def procesar_cola(context):
     if cola:
         await procesar_cola(context)
 
-# -------- BOTON --------
+# -------- BOTON HANDLER --------
 async def botones_handler(update, context):
     query = update.callback_query
     await query.answer()
