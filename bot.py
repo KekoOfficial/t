@@ -1,5 +1,6 @@
 import os
 import asyncio
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -9,15 +10,19 @@ from telegram.ext import (
     filters,
     ContextTypes
 )
-from telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
-from telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola
 
 # ---------------- CONFIG ----------------
+load_dotenv()  # Cargar variables de .env
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     raise Exception("❌ Debes definir tu TOKEN en las variables de entorno")
-ADMIN_ID = 8295382991  # Tu user_id de Telegram
-FRAGMENTOS = 10  # Para descargar más rápido
+
+ADMIN_ID = 8295382991  # Reemplaza con tu user_id de Telegram
+FRAGMENTOS = 10  # Para descargas rápidas
+
+# ---------------- MODULOS INTERNOS ----------------
+from telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
+from telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola
 
 # ---------------- BOTONES ----------------
 def botones():
@@ -66,7 +71,6 @@ async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pos = agregar_a_cola(user_id, url)
     await query.edit_message_text(f"💜 Añadido a la cola\n📊 Posición: {pos}\n⏱ Tiempo estimado: calculando...")
 
-    # Descargar según el botón
     try:
         title = obtener_metadata(url)
         if query.data == "mp3":
@@ -93,7 +97,6 @@ async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------- HANDLER MENSAJES ----------------
 async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    # Detectar links
     if msg.text and "http" in msg.text:
         context.user_data['link'] = msg.text
         await msg.reply_text("🔥 Link detectado, elige formato:", reply_markup=botones())
