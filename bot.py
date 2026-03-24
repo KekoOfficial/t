@@ -1,23 +1,20 @@
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from dotenv import load_dotenv
 import os
-
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram_bot.downloader import procesar_link, botones_handler
-from telegram_log.logger import registrar
-from telegram_menu.menu import start
 
-load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+async def start(update, context):
+    await update.message.reply_text(
+        "💀 KHASAM BOT Ultimate 24/7\n"
+        "Envía links de YouTube/TikTok y elige MP3 o MP4.\n"
+        "🎵 YouTube → MP3 con portada\n"
+        "🎬 TikTok → MP4\n"
+        "📝 Cola, progreso real y VIP!"
+    )
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.ALL, registrar))
-    app.add_handler(CallbackQueryHandler(botones_handler))
-
-    print("🔥 BOT CORE ACTIVO")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_link))
+app.add_handler(CallbackQueryHandler(botones_handler))
+app.run_polling()
