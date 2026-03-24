@@ -7,44 +7,25 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # -------- COLA GLOBAL --------
 cola = deque()
-en_proceso = False
 estado_cola = []
-VIP_USERS = [123456789]  # 👑 Pon tu ID VIP
+en_proceso = False
+VIP_USERS = [123456789]  # 👑 Pon aquí tus IDs VIP
+
+# -------- CARPETAS --------
+os.makedirs("downloads/audio", exist_ok=True)
+os.makedirs("downloads/video", exist_ok=True)
 
 # -------- BOTONES --------
 def botones():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
-            InlineKeyboardButton("🎬 MP4", callback_data="mp4")
-        ]
+        [InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
+         InlineKeyboardButton("🎬 MP4", callback_data="mp4")]
     ])
 
 # -------- TIEMPO ESTIMADO --------
 def estimar_tiempo(posicion):
-    # base aproximada por descarga en segundos
-    base = 15  # más rápido con fragmentos 10
+    base = 15  # segundos aprox por descarga con fragmentos 10
     return posicion * base
-
-# -------- PROGRESO REAL --------
-async def descargar_con_progreso(cmd, msg):
-    proceso = subprocess.Popen(
-        cmd,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True
-    )
-
-    for linea in proceso.stdout:
-        if "%" in linea and "ETA" in linea:
-            try:
-                porcentaje = linea.split("%")[0].split()[-1]
-                await msg.edit_text(f"📊 {porcentaje}% descargado...")
-            except:
-                pass
-
-    proceso.wait()
 
 # -------- METADATA --------
 def obtener_metadata(url):
@@ -60,31 +41,38 @@ def obtener_metadata(url):
     except:
         return "KHASAM"
 
-# -------- COLA INFO --------
+# -------- PROGRESO REAL --------
+async def descargar_con_progreso(cmd, msg):
+    proceso = subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
+    for linea in proceso.stdout:
+        if "%" in linea and "ETA" in linea:
+            try:
+                porcentaje = linea.split("%")[0].split()[-1]
+                await msg.edit_text(f"📊 {porcentaje}% descargado...")
+            except:
+                pass
+    proceso.wait()
+
+# -------- COLA VISUAL --------
 def ver_cola():
     texto = "🧾 COLA ACTUAL:\n\n"
     for i, user in enumerate(estado_cola, start=1):
         texto += f"{i}. {user}\n"
     return texto if estado_cola else "🧾 Cola vacía"
 
-# -------- PROCESAR LINK --------
-async def procesar_link(update, context):
-    url = update.message.text
-    context.user_data['link'] = url
-    await update.message.reply_text(
-        "💜 Elige formato:",
-        reply_markup=botones()
-    )
-
 # -------- PROCESAR COLA --------
 async def procesar_cola(context):
     global en_proceso
-
     if en_proceso or not cola:
         return
 
     en_proceso = True
-
     query, formato, user_id, username, url = cola.popleft()
     estado_cola.pop(0)
 
@@ -97,11 +85,23 @@ async def procesar_cola(context):
             ruta = f"downloads/audio/{user_id}.mp3"
             cmd = (
                 f'yt-dlp -x --audio-format mp3 --embed-thumbnail '
-                f'--convert-thumbnails png --concurrent-fragments 10 '
+                f'--convert-thumbnails png --concurrent-fragments 10 --fixup never '
                 f'-o "downloads/audio/{user_id}.%(ext)s" "{url}"'
             )
             await descargar_con_progreso(cmd, msg)
             thumb = f"downloads/audio/{user_id}.png"
+
+            # Esperar archivo
+            for _ in range(15):
+                if os.path.exists(ruta):
+                    break
+                await asyncio.sleep(1)
+            else:
+                await query.message.reply_text("❌ Error: No se pudo descargar el audio")
+                en_proceso = False
+                if cola:
+                    await procesar_cola(context)
+                return
 
             await query.message.reply_audio(
                 audio=open(ruta, "rb"),
@@ -112,10 +112,22 @@ async def procesar_cola(context):
         else:
             ruta = f"downloads/video/{user_id}.mp4"
             cmd = (
-                f'yt-dlp -f mp4 --concurrent-fragments 10 '
+                f'yt-dlp -f mp4 --concurrent-fragments 10 --fixup never '
                 f'-o "{ruta}" "{url}"'
             )
             await descargar_con_progreso(cmd, msg)
+
+            # Esperar archivo
+            for _ in range(15):
+                if os.path.exists(ruta):
+                    break
+                await asyncio.sleep(1)
+            else:
+                await query.message.reply_text("❌ Error: No se pudo descargar el video")
+                en_proceso = False
+                if cola:
+                    await procesar_cola(context)
+                return
 
             await query.message.reply_video(
                 video=open(ruta, "rb"),
@@ -131,7 +143,6 @@ async def procesar_cola(context):
     await query.message.reply_text("✅ Descarga completa 💜")
 
     en_proceso = False
-
     if cola:
         await procesar_cola(context)
 
@@ -139,7 +150,6 @@ async def procesar_cola(context):
 async def botones_handler(update, context):
     query = update.callback_query
     await query.answer()
-
     user_id = query.from_user.id
     username = query.from_user.username or "User"
     url = context.user_data.get("link")
@@ -159,7 +169,6 @@ async def botones_handler(update, context):
         posicion = len(cola)
 
     tiempo = estimar_tiempo(posicion)
-
     await query.edit_message_text(
         f"💜 Añadido a la cola\n"
         f"📊 Posición: {posicion}\n"
