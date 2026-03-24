@@ -1,104 +1,108 @@
-# bot.py
 import os
 import asyncio
-from dotenv import load_dotenv
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes
+)
+from telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
+from telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola
 
-# ---------------- CARGAR VARIABLES DE ENTORNO ----------------
-load_dotenv()
+# ---------------- CONFIG ----------------
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    raise Exception("❌ Debes definir tu TOKEN en las variables de entorno (.env)")
+    raise Exception("❌ Debes definir tu TOKEN en las variables de entorno")
+ADMIN_ID = 8295382991  # Tu user_id de Telegram
+FRAGMENTOS = 10  # Para descargar más rápido
 
-# ---------------- IMPORTAR MÓDULOS DEL BOT ----------------
-from telegram_bot.control import start_command, botones
-from telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
-from telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola, ver_cola, en_proceso
+# ---------------- BOTONES ----------------
+def botones():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
+         InlineKeyboardButton("🎬 MP4", callback_data="mp4")],
+        [InlineKeyboardButton("🔼 Actualizar Bot", callback_data="actualizar")]
+    ])
 
-# ---------------- HANDLER: Procesar link ----------------
-async def procesar_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Detecta links y muestra botones MP3/MP4"""
-    url = update.message.text
-    context.user_data['link'] = url
-    await update.message.reply_text("💜 Elige formato:", reply_markup=botones())
+# ---------------- COMANDO /START ----------------
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "💀 KHASAM BOT SYSTEM\n\n"
+        "Envía un link:\n"
+        "🎵 MP3\n🎬 MP4\n\n"
+        "🔼 Sistema modular activo",
+        reply_markup=botones()
+    )
 
-# ---------------- HANDLER: Botones ----------------
+# ---------------- HANDLER BOTONES ----------------
 async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gestiona la elección de MP3/MP4 y añade a la cola"""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    username = query.from_user.username or "User"
     url = context.user_data.get("link")
 
+    # BOTÓN ACTUALIZAR
+    if query.data == "actualizar":
+        if user_id != ADMIN_ID:
+            await query.edit_message_text("❌ Solo el admin puede actualizar el bot")
+            return
+        await query.edit_message_text("🔼 Actualizando bot desde Git...")
+        try:
+            result = os.popen("git pull").read()
+            await query.edit_message_text(f"✅ Actualización completa:\n<pre>{result}</pre>", parse_mode="HTML")
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error al actualizar:\n{e}")
+        return
+
+    # BOTONES MP3 / MP4
     if not url:
-        await query.edit_message_text("❌ No hay link")
+        await query.edit_message_text("❌ No hay link guardado para descargar")
         return
 
-    formato = query.data
-    # Agregar a la cola y obtener posición
-    posicion = agregar_a_cola(user_id, username, query, url, formato)
+    # Agregar a la cola
+    pos = agregar_a_cola(user_id, url)
+    await query.edit_message_text(f"💜 Añadido a la cola\n📊 Posición: {pos}\n⏱ Tiempo estimado: calculando...")
 
-    await query.edit_message_text(
-        f"💜 Añadido a la cola\n"
-        f"📊 Posición: {posicion}\n"
-        f"⏱ Tiempo estimado: {posicion*15}s\n\n"
-        f"🧾 Cola actual:\n{ver_cola()}"
-    )
-
-    # Procesar cola si no hay descargas en curso
-    await procesar_cola(context)
-
-# ---------------- FUNCION: Procesar cola ----------------
-async def procesar_cola(context: ContextTypes.DEFAULT_TYPE):
-    """Procesa la cola de usuarios y descarga los archivos"""
-    global en_proceso
-    if en_proceso or not estado_cola:
-        return
-
-    en_proceso = True
-    query, formato, user_id, username, url = quitar_de_cola()
-    msg = await query.message.reply_text("💜 Iniciando descarga...")
-    title = obtener_metadata(url)
-
+    # Descargar según el botón
     try:
-        if formato == "mp3":
-            ruta, thumb = await descargar_audio(user_id, url, msg)
+        title = obtener_metadata(url)
+        if query.data == "mp3":
+            audio_path, thumb = await descargar_audio(user_id, url, query)
             await query.message.reply_audio(
-                audio=open(ruta, "rb"),
+                audio=open(audio_path, "rb"),
                 title=title,
-                thumbnail=open(thumb, "rb") if os.path.exists(thumb) else None
+                thumbnail=open(thumb, "rb") if thumb else None
             )
         else:
-            ruta = await descargar_video(user_id, url, msg)
-            await query.message.reply_video(
-                video=open(ruta, "rb"),
-                caption=title
-            )
-
-        # Eliminar archivos temporales
-        if os.path.exists(ruta):
-            os.remove(ruta)
-        if formato == "mp3" and os.path.exists(thumb):
-            os.remove(thumb)
-
+            video_path = await descargar_video(user_id, url, query)
+            await query.message.reply_video(video=open(video_path, "rb"), caption=title)
     except Exception as e:
         await query.message.reply_text(f"❌ Error en descarga: {e}")
+    finally:
+        quitar_de_cola(user_id)
+        # Borrar archivos temporales
+        for f in [f"downloads/audio/{user_id}.mp3", f"downloads/audio/{user_id}.png",
+                  f"downloads/video/{user_id}.mp4"]:
+            if os.path.exists(f):
+                os.remove(f)
+        await query.message.reply_text("✅ Descarga completa 💜")
 
-    await query.message.reply_text("✅ Descarga completa 💜")
-    en_proceso = False
-
-    # Continuar con siguiente usuario si hay más en cola
-    if estado_cola:
-        await procesar_cola(context)
+# ---------------- HANDLER MENSAJES ----------------
+async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    # Detectar links
+    if msg.text and "http" in msg.text:
+        context.user_data['link'] = msg.text
+        await msg.reply_text("🔥 Link detectado, elige formato:", reply_markup=botones())
+        return
+    await msg.reply_text("💀 Envía un link válido para descargar MP3 o MP4")
 
 # ---------------- INICIALIZAR BOT ----------------
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start_command))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_link))
 app.add_handler(CallbackQueryHandler(botones_handler))
-
-print("💀 KHASAM BOT corriendo...")
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, registrar))
 app.run_polling()
