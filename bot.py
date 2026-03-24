@@ -1,22 +1,30 @@
 # bot.py
 import os
 import asyncio
+from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import ContextTypes
 
-# ---------------- IMPORTS DE NUESTROS MÓDULOS ----------------
+# ---------------- CARGAR VARIABLES DE ENTORNO ----------------
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
+if not TOKEN:
+    raise Exception("❌ Debes definir tu TOKEN en las variables de entorno (.env)")
+
+# ---------------- IMPORTAR MÓDULOS DEL BOT ----------------
 from telegram_bot.control import start_command, botones
 from telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
 from telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola, ver_cola, en_proceso
 
-# ---------------- HANDLERS ----------------
+# ---------------- HANDLER: Procesar link ----------------
 async def procesar_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Detecta links y muestra botones MP3/MP4"""
     url = update.message.text
     context.user_data['link'] = url
     await update.message.reply_text("💜 Elige formato:", reply_markup=botones())
 
+# ---------------- HANDLER: Botones ----------------
 async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gestiona la elección de MP3/MP4 y añade a la cola"""
     query = update.callback_query
@@ -24,7 +32,7 @@ async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     username = query.from_user.username or "User"
     url = context.user_data.get("link")
-    
+
     if not url:
         await query.edit_message_text("❌ No hay link")
         return
@@ -43,6 +51,7 @@ async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Procesar cola si no hay descargas en curso
     await procesar_cola(context)
 
+# ---------------- FUNCION: Procesar cola ----------------
 async def procesar_cola(context: ContextTypes.DEFAULT_TYPE):
     """Procesa la cola de usuarios y descarga los archivos"""
     global en_proceso
@@ -69,7 +78,7 @@ async def procesar_cola(context: ContextTypes.DEFAULT_TYPE):
                 caption=title
             )
 
-        # Eliminar archivo temporal
+        # Eliminar archivos temporales
         if os.path.exists(ruta):
             os.remove(ruta)
         if formato == "mp3" and os.path.exists(thumb):
@@ -81,15 +90,11 @@ async def procesar_cola(context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text("✅ Descarga completa 💜")
     en_proceso = False
 
-    # Si hay más usuarios en cola, continuar
+    # Continuar con siguiente usuario si hay más en cola
     if estado_cola:
         await procesar_cola(context)
 
-# ---------------- RUN BOT ----------------
-TOKEN = os.getenv("TOKEN")
-if not TOKEN:
-    raise Exception("❌ Debes definir tu TOKEN en las variables de entorno")
-
+# ---------------- INICIALIZAR BOT ----------------
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_link))
