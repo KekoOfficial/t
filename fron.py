@@ -1,64 +1,97 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+# fron.py
+import os
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from import import descargar_audio, descargar_video, obtener_metadata, agregar_a_cola, quitar_de_cola, ADMIN_ID
+from modules import (
+    descargar_audio,
+    descargar_video,
+    obtener_metadata,
+    agregar_a_cola,
+    quitar_de_cola,
+    estado_cola,
+    ADMIN_ID
+)
 
 # ---------------- BOTONES ----------------
 def botones():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
-         InlineKeyboardButton("🎬 MP4", callback_data="mp4")],
-        [InlineKeyboardButton("🔼 Actualizar Bot", callback_data="actualizar")]
+        [
+            InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
+            InlineKeyboardButton("🎬 MP4", callback_data="mp4")
+        ],
+        [
+            InlineKeyboardButton("🔼 Actualizar Bot", callback_data="actualizar")
+        ]
     ])
 
 # ---------------- COMANDO /START ----------------
-async def start_command(update, context: ContextTypes.DEFAULT_TYPE):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "💀 KHASAM BOT SYSTEM\nEnvía un link:\n🎵 MP3\n🎬 MP4\n🔼 Sistema modular activo",
+        "💀 KHASAM BOT SYSTEM\n\n"
+        "Envía un link:\n"
+        "🎵 MP3\n🎬 MP4\n\n"
+        "🔼 Sistema modular activo",
         reply_markup=botones()
     )
 
 # ---------------- HANDLER BOTONES ----------------
-async def botones_handler(update, context: ContextTypes.DEFAULT_TYPE):
+async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     url = context.user_data.get("link")
 
-    # Actualizar Bot
+    # --- BOTÓN ACTUALIZAR ---
     if query.data == "actualizar":
         if user_id != ADMIN_ID:
             await query.edit_message_text("❌ Solo el admin puede actualizar el bot")
             return
-        import os
-        result = os.popen("git pull").read()
-        await query.edit_message_text(f"✅ Actualización completa:\n<pre>{result}</pre>", parse_mode="HTML")
+        await query.edit_message_text("🔼 Actualizando bot desde Git...")
+        try:
+            result = os.popen("git pull").read()
+            await query.edit_message_text(f"✅ Actualización completa:\n<pre>{result}</pre>", parse_mode="HTML")
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error al actualizar:\n{e}")
         return
 
+    # --- BOTONES MP3 / MP4 ---
     if not url:
-        await query.edit_message_text("❌ No hay link guardado")
+        await query.edit_message_text("❌ No hay link guardado para descargar")
         return
 
-    # Agregar a la cola
+    # Agregar usuario a la cola
     pos = agregar_a_cola(user_id, url)
-    await query.edit_message_text(f"💜 Añadido a la cola\n📊 Posición: {pos}")
+    await query.edit_message_text(f"💜 Añadido a la cola\n📊 Posición: {pos}\n⏱ Calculando tiempo estimado...")
 
     try:
         title = obtener_metadata(url)
         if query.data == "mp3":
-            audio_path, thumb = await descargar_audio(user_id, url)
-            await query.message.reply_audio(audio=open(audio_path, "rb"), title=title, thumbnail=open(thumb, "rb") if thumb else None)
+            audio_path, thumb = await descargar_audio(user_id, url, query)
+            await query.message.reply_audio(
+                audio=open(audio_path, "rb"),
+                title=title,
+                thumbnail=open(thumb, "rb") if thumb else None
+            )
         else:
-            video_path = await descargar_video(user_id, url)
-            await query.message.reply_video(video=open(video_path, "rb"), caption=title)
+            video_path = await descargar_video(user_id, url, query)
+            await query.message.reply_video(
+                video=open(video_path, "rb"),
+                caption=title
+            )
+    except Exception as e:
+        await query.message.reply_text(f"❌ Error en descarga: {e}")
     finally:
         quitar_de_cola(user_id)
-        # Borrar archivos temporales
-        for f in [f"downloads/audio/{user_id}.mp3", f"downloads/audio/{user_id}.png", f"downloads/video/{user_id}.mp4"]:
+        # Borrar archivos temporales del usuario
+        for f in [f"downloads/audio/{user_id}.mp3", f"downloads/audio/{user_id}.png",
+                  f"downloads/video/{user_id}.mp4"]:
             if os.path.exists(f):
                 os.remove(f)
+        await query.message.reply_text("✅ Descarga completa 💜")
 
 # ---------------- HANDLER MENSAJES ----------------
-async def registrar(update, context: ContextTypes.DEFAULT_TYPE):
+async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if msg.text and "http" in msg.text:
         context.user_data['link'] = msg.text
