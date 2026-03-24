@@ -1,0 +1,6 @@
+# Crear carpetas si no existen
+os.makedirs("downloads/audio", exist_ok=True)
+os.makedirs("downloads/video", exist_ok=True)
+os.makedirs("logs", exist_ok=True)
+
+LOG_FILE = "logs/mensajes.json"
