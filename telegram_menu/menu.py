@@ -3,8 +3,8 @@ from telegram.ext import ContextTypes
 import os
 import subprocess
 
-# ID del admin (tú)
-ADMIN_ID = 8295382991  # <- reemplaza con tu user_id de Telegram
+# ID del admin
+ADMIN_ID = 8295382991  # <- tu user_id
 
 # ----------------- Botones -----------------
 def botones():
@@ -14,7 +14,7 @@ def botones():
             InlineKeyboardButton("🎬 MP4", callback_data="mp4")
         ],
         [
-            InlineKeyboardButton("⚡ Actualizar Bot", callback_data="actualizar")
+            InlineKeyboardButton("🔼 Actualizar Bot", callback_data="actualizar")
         ]
     ])
 
@@ -24,23 +24,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💀 KHASAM BOT SYSTEM\n\n"
         "Envía un link:\n"
         "🎵 MP3\n🎬 MP4\n\n"
-        "⚡ Sistema modular activo",
+        "🔼 Sistema modular activo",
         reply_markup=botones()
     )
 
-# ----------------- Handler del botón Actualizar -----------------
+# ----------------- Handler de botones -----------------
 async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
 
-    # Solo admin puede actualizar
+    # Botón de actualizar
     if query.data == "actualizar":
         if user_id != ADMIN_ID:
             await query.edit_message_text("❌ Solo el admin puede actualizar el bot")
             return
 
-        await query.edit_message_text("⚡ Actualizando bot desde Git...")
+        await query.edit_message_text("🔼 Actualizando bot desde Git...")
         try:
             # Ejecutar git pull desde Termux
             result = subprocess.run(
@@ -53,5 +53,5 @@ async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"❌ Error al actualizar:\n{e}")
 
     else:
-        # Aquí puedes manejar otros botones como mp3/mp4
+        # Aquí manejas mp3/mp4 u otros botones
         await query.edit_message_text(f"Botón presionado: {query.data}")
