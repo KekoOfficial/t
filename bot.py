@@ -2,36 +2,49 @@
 import os
 import asyncio
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from Telegram_bot.control import start_command, botones
-from Telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
-from Telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola, ver_cola, en_proceso
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
 
-async def procesar_link(update, context):
+# ---------------- IMPORTS DE NUESTROS MÓDULOS ----------------
+from telegram_bot.control import start_command, botones
+from telegram_bot.downloader import descargar_audio, descargar_video, obtener_metadata
+from telegram_bot.cola import agregar_a_cola, quitar_de_cola, estado_cola, ver_cola, en_proceso
+
+# ---------------- HANDLERS ----------------
+async def procesar_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Detecta links y muestra botones MP3/MP4"""
     url = update.message.text
     context.user_data['link'] = url
     await update.message.reply_text("💜 Elige formato:", reply_markup=botones())
 
-async def botones_handler(update, context):
+async def botones_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestiona la elección de MP3/MP4 y añade a la cola"""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     username = query.from_user.username or "User"
     url = context.user_data.get("link")
+    
     if not url:
         await query.edit_message_text("❌ No hay link")
         return
 
     formato = query.data
+    # Agregar a la cola y obtener posición
     posicion = agregar_a_cola(user_id, username, query, url, formato)
+
     await query.edit_message_text(
-        f"💜 Añadido a la cola\n📊 Posición: {posicion}\n⏱ Tiempo estimado: {posicion*15}s\n\n"
+        f"💜 Añadido a la cola\n"
+        f"📊 Posición: {posicion}\n"
+        f"⏱ Tiempo estimado: {posicion*15}s\n\n"
         f"🧾 Cola actual:\n{ver_cola()}"
     )
 
-    # Procesar cola
+    # Procesar cola si no hay descargas en curso
     await procesar_cola(context)
 
-async def procesar_cola(context):
+async def procesar_cola(context: ContextTypes.DEFAULT_TYPE):
+    """Procesa la cola de usuarios y descarga los archivos"""
     global en_proceso
     if en_proceso or not estado_cola:
         return
@@ -55,20 +68,32 @@ async def procesar_cola(context):
                 video=open(ruta, "rb"),
                 caption=title
             )
+
+        # Eliminar archivo temporal
         if os.path.exists(ruta):
             os.remove(ruta)
+        if formato == "mp3" and os.path.exists(thumb):
+            os.remove(thumb)
+
     except Exception as e:
-        await query.message.reply_text(f"❌ Error: {e}")
+        await query.message.reply_text(f"❌ Error en descarga: {e}")
 
     await query.message.reply_text("✅ Descarga completa 💜")
     en_proceso = False
+
+    # Si hay más usuarios en cola, continuar
     if estado_cola:
         await procesar_cola(context)
 
 # ---------------- RUN BOT ----------------
 TOKEN = os.getenv("TOKEN")
+if not TOKEN:
+    raise Exception("❌ Debes definir tu TOKEN en las variables de entorno")
+
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_link))
 app.add_handler(CallbackQueryHandler(botones_handler))
+
+print("💀 KHASAM BOT corriendo...")
 app.run_polling()
